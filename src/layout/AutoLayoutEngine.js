@@ -389,13 +389,16 @@ export const AutoLayoutEngine = {
         "elk.edgeRouting": "ORTHOGONAL",
         "elk.portConstraints": "FIXED_SIDE",
         "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+        "elk.layered.nodePlacement.bk.fixedAlignment": "BALANCED",
         "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
         "elk.layered.layering.strategy": "USER_DEFINED",
         "elk.separateConnectedComponents": "true",
-        "elk.spacing.nodeNode": "120",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "150",
-        "elk.spacing.portPort": "20",
-        "elk.spacing.edgeEdge": "15"
+        "elk.spacing.nodeNode": "140",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "160",
+        "elk.spacing.portPort": "24",
+        "elk.spacing.edgeEdge": "20",
+        "elk.spacing.edgeNode": "40",
+        "elk.layered.spacing.edgeNodeBetweenLayers": "40"
       },
       children: elkNodes,
       edges: elkEdges
