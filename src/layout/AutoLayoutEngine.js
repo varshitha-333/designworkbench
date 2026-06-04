@@ -9,16 +9,27 @@ const getModeTier = (mode, semanticType) => {
   if (mode === 'system_design') {
     switch (semanticType) {
       case 'user':
+      case 'actor':
         return 0; // Users / Clients
       case 'cdn':
-        return 1; // CDN
+      case 'cloud':
+        return 1; // CDN / Ingress Cloud
       case 'gateway':
-        return 2; // API Gateway
+      case 'api':
+        return 2; // API Gateway / API Endpoint
       case 'lb':
-        return 3; // Load Balancer
+      case 'decision':
+        return 3; // Load Balancer / Branching Decision
       case 'server':
+      case 'microservice':
+      case 'container':
+      case 'process':
+      case 'square':
+      case 'rectangle':
         return 4; // Application Layer
       case 'cache':
+      case 'hexagon':
+      case 'circle':
         return 5; // Cache
       case 'queue':
         return 6; // Queue
@@ -26,27 +37,42 @@ const getModeTier = (mode, semanticType) => {
         return 7; // Workers
       case 'database':
       case 'storage':
-        return 8; // Database / Storage
+      case 'datastore':
+      case 'cylinder':
+      case 'document':
+        return 8; // Database / Storage / Document Datastore
       default:
         return 4; // default app layer
     }
   } else if (mode === 'ai_agents') {
     switch (semanticType) {
       case 'user':
-        return 0; // User
+      case 'actor':
+        return 0; // User Input
       case 'agent':
-        return 1; // Coordinator
+      case 'square':
+      case 'rectangle':
+        return 1; // Agent Coordinator
       case 'planner':
       case 'router':
       case 'llm':
-        return 2; // Agents
+      case 'cloud':
+      case 'decision':
+        return 2; // Agents / LLM / Router Planner
       case 'tool':
-        return 3; // Tools
+      case 'process':
+      case 'api':
+        return 3; // Execution Tools / APIs
       case 'memory':
       case 'kb':
-        return 4; // Memory
+      case 'datastore':
+      case 'cylinder':
+      case 'document':
+      case 'hexagon':
+      case 'circle':
+        return 4; // Memory / Knowledge Base
       default:
-        return 2;
+        return 2; // default Agent layer
     }
   } else if (mode === 'oop') {
     switch (semanticType) {
@@ -56,11 +82,16 @@ const getModeTier = (mode, semanticType) => {
         return 1; // Abstract
       case 'class':
       case 'package':
+      case 'square':
+      case 'rectangle':
         return 2; // Class
       case 'object':
-        return 3; // Object
+      case 'actor':
+      case 'circle':
+      case 'cylinder':
+        return 3; // Object Instance
       default:
-        return 2;
+        return 2; // default Class layer
     }
   }
   return 2;
