@@ -14,6 +14,7 @@ import { ShapeRegistry } from './ShapeRegistry';
 import { customNodeTypes, getNodeDimensions } from './CustomNodes';
 import { customEdgeTypes } from './CustomEdges';
 import { AutoLayoutEngine } from '../layout/AutoLayoutEngine';
+import { Plus, Minus, Maximize2 } from 'lucide-react';
 
 function CanvasInner() {
   const [storeState] = useDiagramStore();
@@ -341,9 +342,35 @@ function CanvasInner() {
         snapToGrid={true}
         snapGrid={[8, 8]}
         fitView
+        zoomOnScroll={true}
       >
         <Background color="#334155" gap={16} size={1} variant="dots" />
       </ReactFlow>
+
+      {/* Floating Zoom & Fit Canvas Controls */}
+      <div className="absolute bottom-4 left-4 z-10 flex items-center space-x-1.5 bg-[#070b13]/85 border border-slate-800/80 p-1 rounded-xl shadow-xl backdrop-blur-md">
+        <button
+          onClick={() => reactFlowInstance.zoomIn()}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-900/60 transition-all cursor-pointer font-bold border-0 bg-transparent"
+          title="Zoom In"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => reactFlowInstance.zoomOut()}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-900/60 transition-all cursor-pointer font-bold border-0 bg-transparent"
+          title="Zoom Out"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => reactFlowInstance.fitView({ padding: 0.2 })}
+          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-900/60 transition-all cursor-pointer font-bold border-0 bg-transparent"
+          title="Zoom to Fit"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
 
 
     </div>
