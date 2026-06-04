@@ -61,7 +61,7 @@ import { ShapeRegistry } from '../canvas/ShapeRegistry';
 import { ModeManager } from '../canvas/ModeManager';
 import { Serializer } from '../services/Serializer';
 import ArchitectureCanvas from '../canvas/ArchitectureCanvas';
-import { AutoLayoutEngine } from '../layout/AutoLayoutEngine';
+import { AutoLayoutEngine, detectSemanticType } from '../layout/AutoLayoutEngine';
 
 const mapTopicNodeTypeToShapeType = (mode, nodeType) => {
   if (mode === 'oop') {
@@ -128,6 +128,189 @@ const generateAILogicalViewText = (nodes, edges, activeCategory) => {
     ...header,
     ...edgeLines
   ].join('\n');
+};
+
+const parseAILogicalViewText = (text, currentMode, mappingsText) => {
+  const lines = text.split('\n');
+  const parsedNodes = [];
+  const parsedEdges = [];
+  let detectedMode = currentMode || 'system_design';
+
+  // Parse custom shape mappings
+  const customMappings = {};
+  if (mappingsText) {
+    mappingsText.split('\n').forEach(ml => {
+      const line = ml.trim();
+      if (!line || line.startsWith('#')) return;
+      const parts = line.split('=');
+      if (parts.length === 2) {
+        const key = parts[0].trim().toLowerCase();
+        const val = parts[1].trim().toLowerCase();
+        customMappings[key] = val;
+      }
+    });
+  }
+
+  // Helper to get or create node
+  const getOrCreateNode = (name, typeText) => {
+    const cleanName = name.trim();
+    if (!cleanName) return null;
+    
+    // Check if we already created it in this parse run
+    let existingNode = parsedNodes.find(n => n.name.toLowerCase() === cleanName.toLowerCase());
+    if (existingNode) {
+      if (typeText && !existingNode.type) {
+        existingNode.type = typeText.trim().toLowerCase();
+      }
+      return existingNode;
+    }
+
+    // Try to resolve type
+    let type = (typeText || '').trim().toLowerCase();
+    if (!type) {
+      // 1. Resolve from custom mappings
+      for (const key in customMappings) {
+        if (cleanName.toLowerCase().includes(key)) {
+          type = customMappings[key];
+          break;
+        }
+      }
+    }
+    if (!type) {
+      // 2. Fallback to default semantic type matching
+      type = detectSemanticType(cleanName, '');
+    }
+    // Fallback to square if generic
+    if (!type) type = 'square';
+
+    // Get config from registry
+    let shapeConfig = null;
+    for (const lib in ShapeRegistry) {
+      if (ShapeRegistry[lib]?.[type]) {
+        shapeConfig = ShapeRegistry[lib][type];
+        break;
+      }
+    }
+    shapeConfig = shapeConfig || {};
+
+    const newNode = {
+      id: `node_${Math.random().toString(36).slice(2, 7)}_${cleanName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`,
+      type: type,
+      name: cleanName,
+      x: 0,
+      y: 0,
+      color: shapeConfig.color || '#3b82f6',
+      properties: { ...shapeConfig.properties } || {},
+      metadata: {
+        createdAt: Date.now(),
+        mode: detectedMode
+      }
+    };
+    parsedNodes.push(newNode);
+    return newNode;
+  };
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    // 1. Category check
+    if (trimmed.toLowerCase().startsWith('category:')) {
+      const catText = trimmed.split(':')[1].trim().toLowerCase();
+      if (catText.includes('oop') || catText.includes('object')) {
+        detectedMode = 'ood';
+      } else if (catText.includes('agent') || catText.includes('ai')) {
+        detectedMode = 'ai_agents';
+      } else if (catText.includes('dsa') || catText.includes('algorithm')) {
+        detectedMode = 'dsa';
+      } else {
+        detectedMode = 'system_design';
+      }
+      return;
+    }
+
+    // Skip headers and separators
+    if (trimmed.startsWith('==') || trimmed.startsWith('--') || trimmed.includes('Logical Data Flow')) {
+      return;
+    }
+
+    // 2. Component lines (e.g. Component: App Server [Type: SERVER])
+    if (trimmed.startsWith('Component:')) {
+      const compMatch = trimmed.match(/Component:\s*([^(#[\]]+)(?:\s*(?:\[Type:\s*(.+?)\]|\((.+?)\)))?/i);
+      if (compMatch) {
+        const name = compMatch[1];
+        const typeText = compMatch[2] || compMatch[3] || '';
+        getOrCreateNode(name, typeText);
+      }
+      return;
+    }
+
+    // 3. Arrow relation lines (e.g. User (CLIENT), Guest (USER) ──▶ LB (GATEWAY))
+    const arrowRegex = /──▶|-->|->|<-|<->|<--/g;
+    const arrowMatch = trimmed.match(arrowRegex);
+    if (arrowMatch) {
+      const parts = trimmed.split(arrowRegex);
+      const operators = arrowMatch;
+
+      for (let i = 0; i < operators.length; i++) {
+        const leftPart = parts[i].trim();
+        const rightPart = parts[i+1].trim();
+        const op = operators[i];
+
+        const parseNodeList = (partText) => {
+          return partText.split(',').map(item => {
+            const trimmedItem = item.trim();
+            if (!trimmedItem) return null;
+            const match = trimmedItem.match(/^([^(]+)(?:\(([^)]+)\))?$/);
+            if (match) {
+              return {
+                name: match[1].trim(),
+                typeText: (match[2] || '').trim()
+              };
+            }
+            return { name: trimmedItem, typeText: '' };
+          }).filter(Boolean);
+        };
+
+        const leftNodesList = parseNodeList(leftPart);
+        const rightNodesList = parseNodeList(rightPart);
+
+        leftNodesList.forEach(leftItem => {
+          rightNodesList.forEach(rightItem => {
+            const leftNode = getOrCreateNode(leftItem.name, leftItem.typeText);
+            const rightNode = getOrCreateNode(rightItem.name, rightItem.typeText);
+
+            if (leftNode && rightNode) {
+              const srcHandle = 'right-source';
+              const tgtHandle = 'left-target';
+
+              const addEdge = (src, tgt) => {
+                const edgeId = `edge_${Date.now().toString().slice(-4)}_${Math.random().toString(36).slice(2, 6)}`;
+                parsedEdges.push({
+                  id: edgeId,
+                  source: src.id,
+                  target: tgt.id,
+                  sourceHandle: srcHandle,
+                  targetHandle: tgtHandle
+                });
+              };
+
+              if (op === '->' || op === '-->' || op === '──▶') {
+                addEdge(leftNode, rightNode);
+              } else if (op === '<-' || op === '<--') {
+                addEdge(rightNode, leftNode);
+              } else if (op === '<->') {
+                addEdge(leftNode, rightNode);
+                addEdge(rightNode, leftNode);
+              }
+            }
+          });
+        });
+      }
+    }
+  });
+
+  return { nodes: parsedNodes, edges: parsedEdges, mode: detectedMode };
 };
 
 
@@ -591,6 +774,38 @@ class ReActAgent:
   const [specContent, setSpecContent] = useState(currentTopic.defaultSpec);
   const [evaluating, setEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState(null);
+
+  const [showTextToDiagModal, setShowTextToDiagModal] = useState(false);
+  const [localShapeMappings, setLocalShapeMappings] = useState(
+    "# Shape Mappings Definition\n" +
+    "# Format: word_keyword = shape_type\n" +
+    "client = circle\n" +
+    "user = circle\n" +
+    "server = square\n" +
+    "gateway = cloud\n" +
+    "database = cylinder\n" +
+    "db = cylinder\n" +
+    "cache = hexagon\n" +
+    "queue = hexagon\n" +
+    "broker = hexagon"
+  );
+
+  const [localJsonText, setLocalJsonText] = useState('');
+  const [localFlowchartText, setLocalFlowchartText] = useState('');
+  const [isTypingJson, setIsTypingJson] = useState(false);
+  const [isTypingFlowchart, setIsTypingFlowchart] = useState(false);
+
+  useEffect(() => {
+    if (!isTypingJson) {
+      setLocalJsonText(Serializer.serializeStoreToJSON(storeState));
+    }
+  }, [storeState.nodes, storeState.edges, isTypingJson]);
+
+  useEffect(() => {
+    if (!isTypingFlowchart) {
+      setLocalFlowchartText(generateAILogicalViewText(nodes, edges, activeCategory));
+    }
+  }, [nodes, edges, activeCategory, isTypingFlowchart]);
 
   // Chat conversation
   const [chatMessages, setChatMessages] = useState([
@@ -1734,6 +1949,14 @@ class ReActAgent:
                       </div>
 
                       <button 
+                        onClick={() => setShowTextToDiagModal(true)}
+                        className="flex items-center space-x-1 px-2.5 py-1 rounded bg-[#0b1220] border border-slate-800 text-[10px] text-cyan-400 hover:border-cyan-600/40 hover:text-cyan-300 transition-colors font-bold cursor-pointer"
+                        title="Open Text-to-Diagram compiler popup editor"
+                      >
+                        <Edit3 className="w-3 h-3 text-cyan-400" />
+                        <span>Text to Diagram</span>
+                      </button>
+                      <button 
                         onClick={triggerAutoLayout}
                         className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-[10px] text-slate-300 hover:border-slate-600 transition-colors font-bold cursor-pointer animate-fade-in"
                         title="Align nodes using selected layout rules"
@@ -2122,20 +2345,44 @@ class ReActAgent:
               {centerTab === 'json' && (
                 <div className="flex-1 flex flex-col p-4 bg-slate-950 min-h-0">
                   <div className="flex justify-between items-center mb-2 px-1 shrink-0">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Developer JSON View (Source of Truth)</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Developer JSON View (Editable Diagram Representation)</span>
+                    <button 
+                      onClick={() => {
+                        const success = Serializer.deserializeJSONToStore(localJsonText);
+                        if (success) {
+                          setTimeout(() => AutoLayoutEngine.triggerAutoLayout(), 50);
+                          alert("🎉 Diagram updated successfully from JSON!");
+                        } else {
+                          alert("❌ Invalid JSON Schema. Please review syntax.");
+                        }
+                      }}
+                      className="flex items-center space-x-1 px-3 py-1.5 rounded bg-violet-650 hover:bg-violet-600 text-[10px] text-white hover:text-white transition-colors font-bold cursor-pointer"
+                    >
+                      <span>Apply JSON to Canvas</span>
+                    </button>
                   </div>
                   <textarea
-                    readOnly
-                    value={Serializer.serializeStoreToJSON(storeState)}
-                    className="flex-grow bg-[#090d16] border border-slate-900 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none resize-none leading-relaxed select-all"
+                    value={localJsonText}
+                    onChange={(e) => setLocalJsonText(e.target.value)}
+                    onFocus={() => setIsTypingJson(true)}
+                    onBlur={() => setIsTypingJson(false)}
+                    className="flex-grow bg-[#090d16] border border-slate-900 rounded-xl p-4 font-mono text-xs text-emerald-400 focus:outline-none focus:border-violet-500 resize-none leading-relaxed"
                   />
                 </div>
               )}
-
               {centerTab === 'dsl' && (
                 <div className="flex-1 flex flex-col p-4 bg-slate-950 min-h-0">
                   <div className="flex justify-between items-center mb-2 px-1 shrink-0">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">AI Flowchart View (Logical Data Flow)</span>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">Logical Flowchart Representation (Generated DSL)</span>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(generateAILogicalViewText(nodes, edges, activeCategory));
+                        alert("📋 Flowchart DSL copied to clipboard!");
+                      }}
+                      className="flex items-center space-x-1 px-3 py-1.5 rounded bg-violet-650 hover:bg-violet-600 text-[10px] text-white hover:text-white transition-colors font-bold cursor-pointer"
+                    >
+                      <span>Copy to Clipboard</span>
+                    </button>
                   </div>
                   <textarea
                     readOnly
@@ -2144,6 +2391,8 @@ class ReActAgent:
                   />
                 </div>
               )}
+
+
 
               {centerTab === 'code' && (
                 <div className="flex-1 flex flex-col p-4 bg-slate-950 min-h-0">
@@ -2661,6 +2910,180 @@ class ReActAgent:
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {showTextToDiagModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4 animate-fade-in text-left">
+            <div className="bg-[#070b13] border border-slate-850 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl relative">
+              {/* Header */}
+              <div className="flex justify-between items-center border-b border-slate-900 bg-slate-950 px-6 py-4">
+                <div className="flex items-center space-x-2 text-left">
+                  <Edit3 className="w-5 h-5 text-cyan-400" />
+                  <div>
+                    <h3 className="font-extrabold text-sm text-white font-sans">Text to Diagram Compiler</h3>
+                    <p className="text-[10px] text-slate-500 font-mono">Create complex architectural flowcharts and map shape representations using structured text instructions.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowTextToDiagModal(false)}
+                  className="p-1.5 rounded hover:bg-slate-900 border border-slate-850 text-slate-400 hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Main Content Area */}
+              <div className="flex-grow flex flex-col md:flex-row overflow-hidden min-h-0">
+                {/* Left Side: Mappings */}
+                <div className="w-full md:w-[40%] border-r border-slate-900 flex flex-col overflow-y-auto p-5 space-y-4 bg-[#080c14]/40 text-left">
+                  {/* Instructions */}
+                  <div className="p-3.5 bg-[#0c1220] border border-slate-850 rounded-xl space-y-1.5 text-slate-400 text-[11px] leading-relaxed select-none">
+                    <strong className="text-slate-200">✍️ Instructions & DSL Rules:</strong>
+                    <ul className="list-disc pl-4 mt-1 space-y-1">
+                      <li>Set category: <code className="text-violet-400 font-mono">Category: System Design</code></li>
+                      <li>Use standard keyboard arrows:
+                        <ul className="list-circle pl-4 space-y-0.5 mt-0.5">
+                          <li>Right: <code className="text-cyan-400 font-mono">-&gt;</code> or <code className="text-cyan-400 font-mono">--&gt;</code> or <code className="text-cyan-400 font-mono">──▶</code></li>
+                          <li>Left: <code className="text-cyan-400 font-mono">&lt;-</code> or <code className="text-cyan-400 font-mono">&lt;--</code></li>
+                          <li>Bidirectional: <code className="text-cyan-400 font-mono">&lt;-&gt;</code></li>
+                        </ul>
+                      </li>
+                      <li>Multi-connections (comma-separated):
+                        <ul className="list-circle pl-4 space-y-0.5 mt-0.5">
+                          <li>Multiple inputs: <code className="text-cyan-400 font-mono">Client, Guest -&gt; Load Balancer</code></li>
+                          <li>Multiple outputs: <code className="text-cyan-400 font-mono">Server -&gt; Primary DB, Replica DB</code></li>
+                        </ul>
+                      </li>
+                      <li>Disconnected elements: <code className="text-violet-400 font-mono">Component: My Element</code></li>
+                    </ul>
+                  </div>
+
+                  {/* Custom Shape Mappings Definition */}
+                  <div className="flex-grow flex flex-col space-y-1.5">
+                    <label className="text-[9px] font-mono text-slate-500 uppercase font-bold tracking-wider">Shape Mappings Definition</label>
+                    <p className="text-[10px] text-slate-500 leading-normal mb-1">Define keywords in component names and match them to visual canvas shapes (e.g. circle, square, cylinder, hexagon, cloud, diamond):</p>
+                    <textarea
+                      value={localShapeMappings}
+                      onChange={(e) => setLocalShapeMappings(e.target.value)}
+                      className="flex-grow min-h-[150px] bg-[#090d16] border border-slate-900 rounded-xl p-4 font-mono text-xs text-slate-300 focus:outline-none focus:border-violet-500 resize-none leading-relaxed"
+                      placeholder="# Define shape mapping overrides here&#10;user = circle&#10;database = cylinder"
+                    />
+                  </div>
+                </div>
+
+                {/* Right Side: Flowchart Editor Textarea */}
+                <div className="flex-grow flex flex-col p-5 space-y-3 min-w-0">
+                  <div className="flex flex-col space-y-1.5 flex-grow min-h-0 text-left">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[9px] font-mono text-slate-500 uppercase font-bold tracking-wider">Flowchart instructions text</label>
+                      <button
+                        onClick={() => {
+                          setLocalFlowchartText(generateAILogicalViewText(storeState.nodes, storeState.edges, storeState.activeMode));
+                        }}
+                        className="flex items-center space-x-1 px-2.5 py-1 rounded bg-[#0b1220] border border-slate-850 text-[10px] text-cyan-400 hover:border-cyan-600/40 hover:text-cyan-300 transition-colors font-bold cursor-pointer"
+                        title="Sync diagram from canvas to flowchart text representation"
+                      >
+                        <span>Sync from Canvas</span>
+                      </button>
+                    </div>
+                    <textarea
+                      value={localFlowchartText}
+                      onChange={(e) => setLocalFlowchartText(e.target.value)}
+                      onFocus={() => setIsTypingFlowchart(true)}
+                      onBlur={() => setIsTypingFlowchart(false)}
+                      className="flex-grow bg-[#090d16] border border-slate-900 rounded-xl p-4 font-mono text-xs text-cyan-400 focus:outline-none focus:border-violet-500 resize-none leading-relaxed min-h-[250px]"
+                      placeholder="Category: System Design&#10;====================================&#10;Logical Data Flow Architecture Path:&#10;------------------------------------&#10;Web Client -> API Gateway -> App Server -> PostgreSQL DB"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="border-t border-slate-900 bg-slate-950 px-6 py-4 flex justify-end space-x-3 shrink-0">
+                <button
+                  onClick={() => setShowTextToDiagModal(false)}
+                  className="px-4 py-2 border border-slate-800 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition-all cursor-pointer font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const currentStore = DiagramStore.getState();
+                    const parsed = parseAILogicalViewText(localFlowchartText, activeCategory, localShapeMappings);
+                    if (parsed.nodes.length > 0) {
+                      // Node Metadata Merger:
+                      // Merge compiled nodes with existing store nodes by name to preserve custom metadata, coordinates, properties
+                      const mergedNodes = parsed.nodes.map(pn => {
+                        const existing = currentStore.nodes.find(n => n.name.toLowerCase() === pn.name.toLowerCase());
+                        if (existing) {
+                          return {
+                            ...pn,
+                            id: existing.id, // preserve ID
+                            position: existing.position || pn.position,
+                            x: existing.x !== undefined ? existing.x : pn.x,
+                            y: existing.y !== undefined ? existing.y : pn.y,
+                            h: existing.h !== undefined ? existing.h : pn.h,
+                            color: existing.color || pn.color,
+                            properties: {
+                              ...pn.properties,
+                              ...existing.properties
+                            },
+                            metadata: {
+                              ...pn.metadata,
+                              ...existing.metadata
+                            }
+                          };
+                        }
+                        return pn;
+                      });
+
+                      // Map edge source/target IDs if we preserved existing IDs
+                      const mergedEdges = parsed.edges.map(pe => {
+                        const originalSrcNode = parsed.nodes.find(n => n.id === pe.source);
+                        const originalTgtNode = parsed.nodes.find(n => n.id === pe.target);
+                        
+                        let sourceId = pe.source;
+                        let targetId = pe.target;
+
+                        if (originalSrcNode) {
+                          const existingSrc = currentStore.nodes.find(n => n.name.toLowerCase() === originalSrcNode.name.toLowerCase());
+                          if (existingSrc) sourceId = existingSrc.id;
+                        }
+                        if (originalTgtNode) {
+                          const existingTgt = currentStore.nodes.find(n => n.name.toLowerCase() === originalTgtNode.name.toLowerCase());
+                          if (existingTgt) targetId = existingTgt.id;
+                        }
+
+                        return {
+                          ...pe,
+                          source: sourceId,
+                          target: targetId
+                        };
+                      });
+
+                      // Apply to store
+                      DiagramStore.setState({
+                        nodes: mergedNodes,
+                        edges: mergedEdges,
+                        activeMode: parsed.mode
+                      });
+
+                      // Trigger auto layout
+                      setTimeout(async () => {
+                        await AutoLayoutEngine.triggerAutoLayout();
+                        setShowTextToDiagModal(false);
+                      }, 50);
+                    } else {
+                      alert("❌ No components parsed. Use syntax like: Client -> Server");
+                    }
+                  }}
+                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold rounded-lg text-white transition-all shadow-md shadow-cyan-500/10 cursor-pointer font-bold"
+                >
+                  Compile and Render Diagram
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
