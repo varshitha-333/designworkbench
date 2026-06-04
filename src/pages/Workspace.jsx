@@ -246,7 +246,7 @@ const parseAILogicalViewText = (text, currentMode, mappingsText) => {
     }
 
     // 3. Arrow relation lines (e.g. User (CLIENT), Guest (USER) ──▶ LB (GATEWAY))
-    const arrowRegex = /──▶|-->|->|<-|<->|<--/g;
+    const arrowRegex = /──▶|<->|-->|<--|->|<-/g;
     const arrowMatch = trimmed.match(arrowRegex);
     if (arrowMatch) {
       const parts = trimmed.split(arrowRegex);
