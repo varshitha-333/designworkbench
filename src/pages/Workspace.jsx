@@ -214,6 +214,11 @@ const parseAILogicalViewText = (text, currentMode, mappingsText) => {
     const trimmed = line.trim();
     if (!trimmed) return;
 
+    // Ignore comment lines (lines starting with # or //)
+    if (trimmed.startsWith('#') || trimmed.startsWith('//')) {
+      return;
+    }
+
     // 1. Category check
     if (trimmed.toLowerCase().startsWith('category:')) {
       const catText = trimmed.split(':')[1].trim().toLowerCase();
@@ -246,7 +251,8 @@ const parseAILogicalViewText = (text, currentMode, mappingsText) => {
     }
 
     // 3. Arrow relation lines (e.g. User (CLIENT), Guest (USER) ──▶ LB (GATEWAY))
-    const arrowRegex = /──▶|<->|-->|<--|->|<-/g;
+    // Supports robust keyboard arrows, Unicode arrows, and smart dashes/auto-corrections
+    const arrowRegex = /──▶|──>|——▶|——>|<-->|<——|-->|<--|<->|<=>|<—|<–|—▶|–▶|—>|–>|=>|->|<-|→|←|↔|<=/g;
     const arrowMatch = trimmed.match(arrowRegex);
     if (arrowMatch) {
       const parts = trimmed.split(arrowRegex);
@@ -295,11 +301,16 @@ const parseAILogicalViewText = (text, currentMode, mappingsText) => {
                 });
               };
 
-              if (op === '->' || op === '-->' || op === '──▶') {
+              // Classify operators
+              const rightOps = ['->', '-->', '──▶', '──>', '——▶', '——>', '—▶', '–▶', '—>', '–>', '=>', '→'];
+              const leftOps = ['<-', '<--', '←', '<=', '<—', '<–', '<——'];
+              const bidiOps = ['<->', '<-->', '↔', '<=>'];
+
+              if (rightOps.includes(op)) {
                 addEdge(leftNode, rightNode);
-              } else if (op === '<-' || op === '<--') {
+              } else if (leftOps.includes(op)) {
                 addEdge(rightNode, leftNode);
-              } else if (op === '<->') {
+              } else if (bidiOps.includes(op)) {
                 addEdge(leftNode, rightNode);
                 addEdge(rightNode, leftNode);
               }
