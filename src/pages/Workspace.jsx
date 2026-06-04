@@ -804,19 +804,12 @@ class ReActAgent:
   const [localJsonText, setLocalJsonText] = useState('');
   const [localFlowchartText, setLocalFlowchartText] = useState('');
   const [isTypingJson, setIsTypingJson] = useState(false);
-  const [isTypingFlowchart, setIsTypingFlowchart] = useState(false);
 
   useEffect(() => {
     if (!isTypingJson) {
       setLocalJsonText(Serializer.serializeStoreToJSON(storeState));
     }
   }, [storeState.nodes, storeState.edges, isTypingJson]);
-
-  useEffect(() => {
-    if (!isTypingFlowchart) {
-      setLocalFlowchartText(generateAILogicalViewText(nodes, edges, activeCategory));
-    }
-  }, [nodes, edges, activeCategory, isTypingFlowchart]);
 
   // Chat conversation
   const [chatMessages, setChatMessages] = useState([
@@ -1960,7 +1953,10 @@ class ReActAgent:
                       </div>
 
                       <button 
-                        onClick={() => setShowTextToDiagModal(true)}
+                        onClick={() => {
+                          setLocalFlowchartText(generateAILogicalViewText(nodes, edges, activeCategory));
+                          setShowTextToDiagModal(true);
+                        }}
                         className="flex items-center space-x-1 px-2.5 py-1 rounded bg-[#0b1220] border border-slate-800 text-[10px] text-cyan-400 hover:border-cyan-600/40 hover:text-cyan-300 transition-colors font-bold cursor-pointer"
                         title="Open Text-to-Diagram compiler popup editor"
                       >
@@ -3001,8 +2997,6 @@ class ReActAgent:
                     <textarea
                       value={localFlowchartText}
                       onChange={(e) => setLocalFlowchartText(e.target.value)}
-                      onFocus={() => setIsTypingFlowchart(true)}
-                      onBlur={() => setIsTypingFlowchart(false)}
                       className="flex-grow bg-[#090d16] border border-slate-900 rounded-xl p-4 font-mono text-xs text-cyan-400 focus:outline-none focus:border-violet-500 resize-none leading-relaxed min-h-[250px]"
                       placeholder="Category: System Design&#10;====================================&#10;Logical Data Flow Architecture Path:&#10;------------------------------------&#10;Web Client -> API Gateway -> App Server -> PostgreSQL DB"
                     />
