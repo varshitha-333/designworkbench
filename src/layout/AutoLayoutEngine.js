@@ -9,20 +9,26 @@ const getModeTier = (mode, semanticType) => {
   if (mode === 'system_design') {
     switch (semanticType) {
       case 'user':
-        return 0; // Ingress
+        return 0; // Users / Clients
       case 'cdn':
-      case 'lb':
+        return 1; // CDN
       case 'gateway':
-        return 1; // Gateway
+        return 2; // API Gateway
+      case 'lb':
+        return 3; // Load Balancer
       case 'server':
-        return 2; // Service
+        return 4; // Application Layer
       case 'cache':
+        return 5; // Cache
       case 'queue':
+        return 6; // Queue
+      case 'worker':
+        return 7; // Workers
       case 'database':
       case 'storage':
-        return 3; // Storage
+        return 8; // Database / Storage
       default:
-        return 2;
+        return 4; // default app layer
     }
   } else if (mode === 'ai_agents') {
     switch (semanticType) {
@@ -88,6 +94,9 @@ export const detectSemanticType = (name = '', nodeType = '') => {
   if (label.includes('storage') || label.includes('s3') || nodeType === 'storage') {
     return 'storage';
   }
+  if (label.includes('worker') || label.includes('daemon') || nodeType === 'worker') {
+    return 'worker';
+  }
   if (label.includes('server') || label.includes('service') || label.includes('api') || label.includes('handler') || nodeType === 'server' || nodeType === 'microservice') {
     return 'server';
   }
@@ -151,45 +160,41 @@ export const detectSemanticType = (name = '', nodeType = '') => {
   return nodeType;
 };
 
-const computeTopologicalLayers = (nodes, edges) => {
-  const inDegree = {};
-  const adjList = {};
+const computeTopologicalLayers = (nodes, edges, activeMode = 'system_design') => {
   const levels = {};
 
+  // 1. Initialize levels to semantic base ranks
   nodes.forEach(n => {
-    inDegree[n.id] = 0;
-    adjList[n.id] = [];
-    levels[n.id] = 0;
+    const semanticType = detectSemanticType(n.name, n.type);
+    levels[n.id] = getModeTier(activeMode, semanticType);
   });
 
-  edges.forEach(e => {
-    if (nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target)) {
-      adjList[e.source].push(e.target);
-      inDegree[e.target]++;
-    }
+  // 2. Filter edges to keep only forward directed edges (strict DAG based on ranks)
+  const filteredEdges = edges.filter(e => {
+    const srcNode = nodes.find(n => n.id === e.source);
+    const tgtNode = nodes.find(n => n.id === e.target);
+    if (!srcNode || !tgtNode) return false;
+
+    const srcRank = getModeTier(activeMode, detectSemanticType(srcNode.name, srcNode.type));
+    const tgtRank = getModeTier(activeMode, detectSemanticType(tgtNode.name, tgtNode.type));
+
+    if (srcRank < tgtRank) return true;
+    if (srcRank > tgtRank) return false; // break cycle/back-edge
+
+    // Same rank: break cycles alphabetically by ID to guarantee a DAG
+    return srcNode.id.localeCompare(tgtNode.id) < 0;
   });
 
-  const queue = [];
-  nodes.forEach(n => {
-    if (inDegree[n.id] === 0) {
-      queue.push(n.id);
-      levels[n.id] = 0;
-    }
-  });
-
-  let iterations = 0;
-  const maxIterations = nodes.length * 3;
-  while (queue.length > 0 && iterations < maxIterations) {
-    const curr = queue.shift();
-    if (adjList[curr]) {
-      adjList[curr].forEach(neighbor => {
-        if (levels[neighbor] < levels[curr] + 1) {
-          levels[neighbor] = levels[curr] + 1;
-          queue.push(neighbor);
-        }
-      });
-    }
-    iterations++;
+  // 3. Relax edges on the DAG to compute longest path levels
+  for (let i = 0; i < nodes.length; i++) {
+    let changed = false;
+    filteredEdges.forEach(e => {
+      if (levels[e.target] < levels[e.source] + 1) {
+        levels[e.target] = levels[e.source] + 1;
+        changed = true;
+      }
+    });
+    if (!changed) break;
   }
 
   return levels;
@@ -245,7 +250,7 @@ export const AutoLayoutEngine = {
     const { activeMode = 'system_design', layoutDirection = 'RIGHT' } = options;
 
     const nodePortsMap = {};
-    const topoLayers = edges.length > 0 ? computeTopologicalLayers(nodes, edges) : {};
+    const topoLayers = edges.length > 0 ? computeTopologicalLayers(nodes, edges, activeMode) : {};
 
     // Build elk node definitions
     const elkNodes = nodes.map(n => {
@@ -354,7 +359,7 @@ export const AutoLayoutEngine = {
         "elk.portConstraints": "FIXED_SIDE",
         "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
         "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-        "elk.layered.layering.strategy": activeMode === 'system_design' ? "USER_DEFINED" : "NETWORK_SIMPLEX",
+        "elk.layered.layering.strategy": "USER_DEFINED",
         "elk.separateConnectedComponents": "true",
         "elk.spacing.nodeNode": "120",
         "elk.layered.spacing.nodeNodeBetweenLayers": "150",
